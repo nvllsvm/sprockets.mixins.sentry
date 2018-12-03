@@ -6,7 +6,7 @@ extensions = [
 ]
 master_doc = 'index'
 project = 'sprockets.mixins.sentry'
-copyright = '2016, AWeber Communications'
+copyright = '2016-2018, AWeber Communications, Inc.'
 version = '.'.join(__version__.split('.')[0:1])
 release = __version__
 pygments_style = 'sphinx'

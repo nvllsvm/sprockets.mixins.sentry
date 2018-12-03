@@ -10,9 +10,9 @@ import os
 import re
 import time
 
-import raven
 from raven.processors import SanitizePasswordsProcessor
-from tornado import web
+import raven
+import raven.contrib.tornado
 
 LOGGER = logging.getLogger(__name__)
 SENTRY_CLIENT = 'sentry_client'
@@ -77,7 +77,7 @@ class SanitizeEmailsProcessor(SanitizePasswordsProcessor):
         return value
 
 
-class SentryMixin:
+class SentryMixin(raven.contrib.tornado.SentryMixin):
     """
     Report unexpected exceptions to Sentry.
 
@@ -111,56 +111,24 @@ class SentryMixin:
 
     """
 
-    def __init__(self, *args, **kwargs):
-        self.sentry_client = None
-        self.sentry_extra = {}
-        self.sentry_tags = {}
-        super().__init__(*args, **kwargs)
+    def get_sentry_extra_info(self):
+        info = super().get_sentry_extra_info()
+        info['extra'].update({
+            'env': self._strip_uri_passwords(dict(os.environ)),
+            'http_host': self.request.host,
+            'remote_ip': self.request.remote_ip
+        })
+        info['time_spent'] = math.ceil(
+            (time.time() - self.request._start_time) * 1000
+        )
 
-    def initialize(self):
-        self.sentry_client = get_client(self.application)
-        if self.sentry_client is None:
-            install(self.application)
-            self.sentry_client = get_client(self.application)
-        super().initialize()
-
-    def _strip_uri_passwords(self, values):
+    @staticmethod
+    def _strip_uri_passwords(values):
         for key in values.keys():
             matches = URI_RE.search(values[key])
             if matches:
                 values[key] = values[key].replace(matches.group(1), '****')
         return values
-
-    def _handle_request_exception(self, e):
-        if (isinstance(e, web.HTTPError)
-                or isinstance(e, web.Finish)
-                or self.sentry_client is None):
-            return super()._handle_request_exception(e)
-
-        duration = math.ceil((time.time() - self.request._start_time) * 1000)
-        kwargs = {'extra': self.sentry_extra, 'time_spent': duration}
-        kwargs['extra'].setdefault(
-            'handler', '{0}.{1}'.format(__name__, self.__class__.__name__))
-        kwargs['extra'].setdefault('env',
-                                   self._strip_uri_passwords(dict(os.environ)))
-        if hasattr(self, 'request'):
-            kwargs['data'] = {
-                'request': {
-                    'url': self.request.full_url(),
-                    'method': self.request.method,
-                    'data': self.request.body,
-                    'query_string': self.request.query,
-                    'cookies': self.request.headers.get('Cookie', {}),
-                    'headers': dict(self.request.headers)},
-                'logger': 'sprockets.mixins.sentry'}
-            kwargs['extra']['http_host'] = self.request.host
-            kwargs['extra']['remote_ip'] = self.request.remote_ip
-
-        if self.sentry_tags:
-            kwargs.update({'tags': self.sentry_tags})
-        self.sentry_client.captureException(**kwargs)
-
-        super()._handle_request_exception(e)
 
 
 def install(application, **kwargs):
@@ -195,10 +163,6 @@ def install(application, **kwargs):
        python/advanced/#client-arguments
 
     """
-    if get_client(application) is not None:
-        LOGGER.warning('sentry client is already installed')
-        return False
-
     sentry_dsn = kwargs.pop('dsn', os.environ.get('SENTRY_DSN'))
     if sentry_dsn is None:
         global _sentry_warning_issued
@@ -229,19 +193,3 @@ def install(application, **kwargs):
     setattr(application, 'sentry_client', client)
 
     return True
-
-
-def get_client(application):
-    """
-    Retrieve the sentry client for `application`.
-
-    :param tornado.web.Application application: application to retrieve
-        the sentry client for.
-    :returns: a :class:`raven.base.Client` instance or :data:`None`
-    :rtype: raven.base.Client
-
-    """
-    try:
-        return application.sentry_client
-    except AttributeError:
-        return None

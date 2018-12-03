@@ -2,8 +2,7 @@ from sprockets.mixins.sentry import __version__
 
 extensions = [
     'sphinx.ext.autodoc',
-    'sphinx.ext.intersphinx',
-    'sphinxcontrib.httpdomain',
+    'sphinx.ext.intersphinx'
 ]
 master_doc = 'index'
 project = 'sprockets.mixins.sentry'
